@@ -1,217 +1,321 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from "react";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { 
-  Wallet, Bell, Plus, X, CheckCircle2, AlertCircle, 
-  ArrowDownCircle, ArrowUpCircle, Loader2, TrendingUp, TrendingDown 
-} from 'lucide-react';
-import { supabase } from '../lib/supabase'; 
+  PlusCircle, 
+  Wallet, 
+  ArrowUpCircle, 
+  ArrowDownCircle, 
+  Bell, 
+  Loader2, 
+  LogOut,
+  X,
+  Calendar,
+  ChevronRight
+} from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
-interface Transaction {
+interface Movement {
   id: string;
-  name: string;
+  type: 'income' | 'expense';
   amount: number;
-  type: 'ingreso' | 'gasto';
+  concept: string;
   category: string;
   created_at: string;
-  has_alert: boolean;
-  alert_days_before: number;
+}
+
+interface Alert {
+  id: string;
+  title: string;
+  date: string;
+  amount: number;
 }
 
 export default function Dashboard() {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [movements, setMovements] = useState<Movement[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([
+    { id: '1', title: 'Alquiler', date: '2024-03-01', amount: 850 },
+    { id: '2', title: 'Suscripción Netflix', date: '2024-03-05', amount: 15.99 }
+  ]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [status, setStatus] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+  const [user, setUser] = useState<any>(null);
+  
+  const [newAmount, setNewAmount] = useState("");
+  const [newConcept, setNewConcept] = useState("");
+  const [newType, setNewType] = useState<'income' | 'expense'>('expense');
+  const [isSaving, setIsSaving] = useState(false);
 
-  const [name, setName] = useState('');
-  const [amount, setAmount] = useState('');
-  const [type, setType] = useState<'ingreso' | 'gasto'>('gasto');
-  const [hasAlert, setHasAlert] = useState(false);
-  const [alertDays, setAlertDays] = useState(0);
+  const supabase = createClientComponentClient();
+  const router = useRouter();
+  const { toast } = useToast();
 
-  useEffect(() => { fetchTransactions(); }, []);
+  useEffect(() => {
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setLoading(false);
+      } else {
+        setUser(session.user);
+        fetchMovements(session.user.id);
+      }
+    };
+    checkUser();
+  }, [supabase]);
 
-  const fetchTransactions = async () => {
+  const fetchMovements = async (userId: string) => {
     try {
-      setLoading(true);
       const { data, error } = await supabase
-        .from('transactions')
+        .from('movements')
         .select('*')
+        .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setTransactions(data || []);
-    } catch (err: any) {
-      console.error("Error:", err);
-      setStatus({ msg: "Error de sincronización", type: 'error' });
+      setMovements(data || []);
+    } catch (error: any) {
+      console.error("Error cargando datos:", error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name || !amount) return;
+  const handleAddMovement = async () => {
+    if (!user) {
+      toast({ title: "Inicia sesión", description: "Debes estar registrado para guardar datos.", variant: "destructive" });
+      return;
+    }
+    if (!newAmount || !newConcept) return;
 
+    setIsSaving(true);
     try {
-      const newTransaction = {
-        name: name.toUpperCase(),
-        amount: parseFloat(amount),
-        type,
-        category: 'General',
-        has_alert: type === 'gasto' ? hasAlert : false,
-        alert_days_before: alertDays,
-      };
-
-      const { data, error } = await supabase
-        .from('transactions')
-        .insert([newTransaction])
-        .select();
+      const { error } = await supabase
+        .from('movements')
+        .insert([{
+          user_id: user.id,
+          type: newType,
+          amount: parseFloat(newAmount),
+          concept: newConcept,
+          category: 'General'
+        }]);
 
       if (error) throw error;
 
-      if (data) {
-        setTransactions([data[0], ...transactions]);
-        setIsModalOpen(false);
-        setStatus({ msg: "¡Sincronizado en la nube!", type: 'success' });
-        setName(''); setAmount(''); setHasAlert(false);
-        setTimeout(() => setStatus(null), 3000);
-      }
-    } catch (err: any) {
-      setStatus({ msg: "Error al guardar los datos", type: 'error' });
-      setTimeout(() => setStatus(null), 4000);
+      toast({ title: "¡Registrado!", description: "Movimiento guardado en tu nube." });
+      setIsModalOpen(false);
+      setNewAmount("");
+      setNewConcept("");
+      fetchMovements(user.id);
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const totalIngresos = transactions.filter(t => t.type === 'ingreso').reduce((acc, curr) => acc + curr.amount, 0);
-  const totalGastos = transactions.filter(t => t.type === 'gasto').reduce((acc, curr) => acc + curr.amount, 0);
-  const balance = totalIngresos - totalGastos;
+  const totals = movements.reduce((acc, curr) => {
+    if (curr.type === 'income') acc.income += Number(curr.amount);
+    else acc.expense += Number(curr.amount);
+    return acc;
+  }, { income: 0, expense: 0 });
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0A0C10] flex items-center justify-center">
+        <Loader2 className="w-10 h-10 text-emerald-500 animate-spin" />
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] p-4 md:p-8 font-sans text-slate-900">
-      {status && (
-        <div className={`fixed top-6 right-6 px-6 py-4 rounded-[2rem] shadow-2xl z-50 flex items-center gap-3 animate-in slide-in-from-top-4 ${status.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}>
-          {status.type === 'success' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
-          <span className="font-black text-xs uppercase tracking-widest">{status.msg}</span>
-        </div>
-      )}
-
-      <header className="max-w-5xl mx-auto mb-10 flex justify-between items-end">
-        <div>
-          <h1 className="text-4xl font-black tracking-tighter text-slate-900 italic">MONEYPAZ<span className="text-blue-600">2</span></h1>
-          <div className="flex items-center gap-2 mt-1">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em]">Cloud Active: najvbblgogakmrpmwago</p>
+    <div className="min-h-screen bg-[#0A0C10] text-gray-100 font-sans pb-20">
+      {/* Header Estilo Premium */}
+      <header className="border-b border-white/5 bg-[#0D1117]/80 backdrop-blur-md sticky top-0 z-40">
+        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
+              <Wallet className="w-5 h-5 text-black" strokeWidth={2.5} />
+            </div>
+            <span className="text-xl font-black tracking-tighter">MONEYPAZ</span>
+          </div>
+          
+          <div className="flex items-center gap-4">
+            {user ? (
+              <Button variant="ghost" className="text-gray-400 hover:text-white text-xs gap-2" onClick={() => supabase.auth.signOut().then(() => window.location.reload())}>
+                <LogOut className="w-4 h-4" />
+                Salir
+              </Button>
+            ) : (
+              <Button onClick={() => router.push('/signup')} className="bg-emerald-500 text-black font-bold text-xs h-8">Unirse</Button>
+            )}
           </div>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="bg-slate-900 text-white px-8 py-4 rounded-2xl flex items-center gap-3 hover:bg-blue-600 transition-all active:scale-95 shadow-2xl shadow-slate-200 font-black text-xs uppercase tracking-[0.2em]"
-        >
-          <Plus size={18} strokeWidth={3} /> Nuevo Registro
-        </button>
       </header>
 
-      {loading ? (
-        <div className="flex flex-col items-center justify-center h-[60vh] opacity-20">
-          <Loader2 className="animate-spin mb-4" size={48} />
-          <p className="font-black uppercase text-[10px] tracking-[0.4em]">Conectando...</p>
-        </div>
-      ) : (
-        <main className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
-          <div className="lg:col-span-8 space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 relative group overflow-hidden">
-                <p className="text-[10px] font-black text-emerald-500 uppercase mb-2 tracking-widest">Ingresos</p>
-                <p className="text-3xl font-black">{totalIngresos.toLocaleString()}€</p>
-                <TrendingUp className="absolute -right-2 -bottom-2 text-emerald-50 opacity-0 group-hover:opacity-100 transition-all" size={80} />
+      <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
+        {/* Balance Card - Inspirado en el proyecto 1 */}
+        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-500 to-emerald-700 p-8 text-black shadow-2xl shadow-emerald-500/20">
+          <div className="relative z-10">
+            <p className="text-sm font-bold opacity-80 uppercase tracking-widest">Balance Disponible</p>
+            <h2 className="text-5xl md:text-6xl font-black mt-1">{(totals.income - totals.expense).toLocaleString()}€</h2>
+            
+            <div className="grid grid-cols-2 gap-4 mt-8">
+              <div className="bg-white/20 backdrop-blur-md rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <ArrowUpCircle className="w-4 h-4" />
+                  <span className="text-xs font-bold uppercase">Ingresos</span>
+                </div>
+                <p className="text-xl font-bold">{totals.income}€</p>
               </div>
-              <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 relative group overflow-hidden">
-                <p className="text-[10px] font-black text-rose-500 uppercase mb-2 tracking-widest">Gastos</p>
-                <p className="text-3xl font-black">{totalGastos.toLocaleString()}€</p>
-                <TrendingDown className="absolute -right-2 -bottom-2 text-rose-50 opacity-0 group-hover:opacity-100 transition-all" size={80} />
-              </div>
-              <div className="bg-blue-600 p-8 rounded-[2.5rem] text-white shadow-2xl shadow-blue-100 flex flex-col justify-center">
-                <p className="text-blue-200 text-[10px] font-black uppercase tracking-widest">Balance Neto</p>
-                <p className="text-4xl font-black tracking-tighter">{balance.toLocaleString()}€</p>
+              <div className="bg-black/10 backdrop-blur-md rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <ArrowDownCircle className="w-4 h-4" />
+                  <span className="text-xs font-bold uppercase">Gastos</span>
+                </div>
+                <p className="text-xl font-bold">{totals.expense}€</p>
               </div>
             </div>
+          </div>
+          {/* Decoración abstracta */}
+          <div className="absolute top-[-20%] right-[-10%] w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
+        </section>
 
-            <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden min-h-[400px]">
-              <div className="p-8 border-b border-slate-50 flex justify-between items-center bg-slate-50/30">
-                <h3 className="font-black text-[10px] uppercase tracking-[0.3em] text-slate-400 font-bold">Historial Cloud</h3>
-              </div>
-              <div className="divide-y divide-slate-50">
-                {transactions.length === 0 ? (
-                  <div className="p-24 text-center">
-                    <p className="text-slate-300 italic font-bold text-sm">No hay datos en la nube.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          {/* Sección de Alertas Próximas (Tu pedido especial) */}
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <Bell className="w-5 h-5 text-blue-400" />
+                Alertas Próximas
+              </h3>
+              <span className="text-xs text-blue-400 font-bold bg-blue-400/10 px-2 py-1 rounded-full">Activas</span>
+            </div>
+            <div className="space-y-3">
+              {alerts.map(alert => (
+                <div key={alert.id} className="bg-[#161B22] border border-[#30363D] p-4 rounded-2xl flex items-center justify-between hover:border-blue-500/50 transition-all cursor-pointer group">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-400">
+                      <Calendar className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm">{alert.title}</p>
+                      <p className="text-xs text-gray-500">Vence el {new Date(alert.date).toLocaleDateString()}</p>
+                    </div>
                   </div>
-                ) : (
-                  transactions.map(t => (
-                    <div key={t.id} className="p-8 flex justify-between items-center hover:bg-slate-50/80 transition-all group">
-                      <div className="flex items-center gap-6">
-                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110 ${t.type === 'ingreso' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                          {t.type === 'ingreso' ? <ArrowUpCircle size={24} /> : <ArrowDownCircle size={24} />}
+                  <div className="text-right flex items-center gap-3">
+                    <p className="font-bold text-sm text-blue-400">-{alert.amount}€</p>
+                    <ChevronRight className="w-4 h-4 text-gray-600 group-hover:translate-x-1 transition-transform" />
+                  </div>
+                </div>
+              ))}
+              <Button variant="ghost" className="w-full border-2 border-dashed border-[#30363D] text-gray-500 h-12 rounded-2xl hover:bg-transparent hover:text-blue-400 hover:border-blue-500/50 transition-all">
+                + Configurar nueva alerta
+              </Button>
+            </div>
+          </section>
+
+          {/* Historial Reciente */}
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold">Historial Reciente</h3>
+              <Button variant="link" className="text-emerald-500 text-xs p-0">Ver todo</Button>
+            </div>
+            <div className="bg-[#161B22] border border-[#30363D] rounded-3xl overflow-hidden">
+              {movements.length === 0 ? (
+                <div className="p-12 text-center text-gray-500 italic text-sm">No hay movimientos registrados aún.</div>
+              ) : (
+                <div className="divide-y divide-[#30363D]">
+                  {movements.slice(0, 5).map((m) => (
+                    <div key={m.id} className="p-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${m.type === 'income' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
+                          {m.type === 'income' ? <ArrowUpCircle size={18} /> : <ArrowDownCircle size={18} />}
                         </div>
                         <div>
-                          <p className="font-black text-slate-800 text-lg tracking-tighter italic uppercase">{t.name}</p>
-                          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">{new Date(t.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                          <p className="text-sm font-bold">{m.concept}</p>
+                          <p className="text-[10px] text-gray-500 uppercase tracking-tighter">{new Date(m.created_at).toLocaleDateString()}</p>
                         </div>
                       </div>
-                      <p className={`font-black text-2xl ${t.type === 'ingreso' ? 'text-emerald-500' : 'text-rose-500'}`}>
-                        {t.type === 'ingreso' ? '+' : '-'}{t.amount.toLocaleString()}€
+                      <p className={`font-black ${m.type === 'income' ? 'text-emerald-500' : 'text-red-500'}`}>
+                        {m.type === 'income' ? '+' : '-'}{m.amount}€
                       </p>
                     </div>
-                  ))
-                )}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
+          </section>
+        </div>
+      </main>
 
-          <div className="lg:col-span-4">
-            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm sticky top-8">
-              <h2 className="text-[10px] font-black text-slate-400 flex items-center gap-3 mb-8 uppercase tracking-[0.3em]">
-                <Bell size={18} className="text-amber-500 fill-amber-500" /> Alertas Programadas
-              </h2>
-              <div className="space-y-4">
-                {transactions.filter(t => t.has_alert).length === 0 ? (
-                  <div className="py-12 px-6 text-center rounded-[2.5rem] border-2 border-dashed border-slate-100">
-                    <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest leading-loose">No hay avisos configurados para gastos recurrentes</p>
-                  </div>
-                ) : (
-                  transactions.filter(t => t.has_alert).map(alert => (
-                    <div key={alert.id} className="p-6 rounded-[2rem] bg-amber-50 border border-amber-100 relative group overflow-hidden">
-                      <p className="font-black text-slate-800 text-xs uppercase italic relative z-10">{alert.name}</p>
-                      <p className="text-[9px] text-amber-600 uppercase font-black mt-1 tracking-tighter relative z-10">Antelación: {alert.alert_days_before} días</p>
-                      <Bell size={40} className="absolute -right-2 -bottom-2 text-amber-200/40 rotate-12 group-hover:rotate-0 transition-transform" />
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        </main>
-      )}
+      {/* Botón Flotante para añadir - Muy estilo App Móvil */}
+      <button 
+        onClick={() => setIsModalOpen(true)}
+        className="fixed bottom-8 right-8 w-16 h-16 bg-emerald-500 text-black rounded-full shadow-2xl shadow-emerald-500/40 flex items-center justify-center hover:scale-110 active:scale-95 transition-all z-50"
+      >
+        <PlusCircle className="w-8 h-8" strokeWidth={2.5} />
+      </button>
 
+      {/* Modal de Registro */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-[3.5rem] w-full max-w-lg shadow-2xl p-10 border border-white/20">
-            <div className="flex justify-between items-center mb-10">
-              <h2 className="text-3xl font-black tracking-tighter uppercase italic text-slate-900">Nuevo Registro</h2>
-              <button onClick={() => setIsModalOpen(false)} className="bg-slate-100 p-4 rounded-full text-slate-400 hover:text-rose-500 transition-all"><X size={24}/></button>
-            </div>
-            
-            <form onSubmit={handleSubmit} className="space-y-8">
-              <div className="flex bg-slate-100 p-2 rounded-3xl shadow-inner">
-                <button type="button" onClick={() => setType('gasto')} className={`flex-1 py-4 rounded-[1.5rem] text-xs font-black transition-all ${type === 'gasto' ? 'bg-white text-rose-600 shadow-xl' : 'text-slate-400'}`}>GASTO</button>
-                <button type="button" onClick={() => setType('ingreso')} className={`flex-1 py-4 rounded-[1.5rem] text-xs font-black transition-all ${type === 'ingreso' ? 'bg-white text-emerald-600 shadow-xl' : 'text-slate-400'}`}>INGRESO</button>
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 z-[100] animate-in fade-in duration-200">
+          <Card className="w-full max-w-sm bg-[#161B22] border-[#30363D] text-white overflow-hidden rounded-3xl">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-[#30363D] bg-[#1C2128]">
+              <CardTitle className="text-lg">Nuevo Movimiento</CardTitle>
+              <Button variant="ghost" size="icon" onClick={() => setIsModalOpen(false)} className="rounded-full">
+                <X className="w-5 h-5" />
+              </Button>
+            </CardHeader>
+            <CardContent className="p-6 space-y-6">
+              <div className="flex p-1 bg-black rounded-2xl">
+                <button 
+                  className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${newType === 'expense' ? 'bg-red-500 text-white' : 'text-gray-500'}`}
+                  onClick={() => setNewType('expense')}
+                >GASTO</button>
+                <button 
+                  className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${newType === 'income' ? 'bg-emerald-500 text-black' : 'text-gray-500'}`}
+                  onClick={() => setNewType('income')}
+                >INGRESO</button>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">¿En qué concepto?</label>
+                  <Input 
+                    placeholder="Ej. Compra semanal" 
+                    className="bg-black/40 border-[#30363D] h-12 rounded-xl focus:ring-emerald-500"
+                    value={newConcept}
+                    onChange={(e) => setNewConcept(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">Importe (€)</label>
+                  <Input 
+                    type="number"
+                    placeholder="0.00" 
+                    className="bg-black/40 border-[#30363D] h-14 rounded-xl text-2xl font-black text-center focus:ring-emerald-500"
+                    value={newAmount}
+                    onChange={(e) => setNewAmount(e.target.value)}
+                  />
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] ml-4">Concepto</label>
-                <input required value={name} onChange={e => setName(e.target.value)} placeholder="EJ. ALQUILER FEBRERO" className="w-full p-6 bg-slate-50 border-2 border-transparent rounded-[2rem] outline-none focus:border-blue-500 focus:bg-white transition-all font-black uppercase text-lg" />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-
+              <Button 
+                className={`w-full h-14 rounded-2xl font-black text-lg transition-all ${newType === 'income' ? 'bg-emerald-500 text-black hover:bg-emerald-400' : 'bg-red-500 text-white hover:bg-red-400'}`}
+                onClick={handleAddMovement}
+                disabled={isSaving}
+              >
+                {isSaving ? <Loader2 className="animate-spin" /> : 'CONFIRMAR'}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
