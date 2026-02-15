@@ -2,7 +2,74 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Configuración de cimientos visuales de Moneypaz 2.0 */
+:root {
+  --foreground-rgb: 255, 255, 255;
+  --background-start-rgb: 10, 12, 16; /* Negro azulado profundo */
+  --background-end-rgb: 10, 12, 16;
+}
+
+/* Aplicamos el tema oscuro por defecto para una experiencia Premium */
 body {
-  background-color: #f9fafb;
-  color: #111827;
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-start-rgb));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Personalización de la barra de desplazamiento (Scrollbar) para modo oscuro */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0A0C10;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #30363D;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #484F58;
+}
+
+/* Capa base para asegurar que los elementos interactivos se sientan táctiles */
+@layer base {
+  button {
+    cursor: pointer;
+  }
+  
+  /* Quitamos las flechas por defecto en los inputs de números para un diseño más limpio */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+}
+
+/* Animaciones para una interfaz dinámica */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.6s ease-out forwards;
+}
+
+/* Estilos para las tarjetas de alertas y movimientos */
+.glass-card {
+  background: rgba(22, 27, 34, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(48, 54, 61, 1);
 }
